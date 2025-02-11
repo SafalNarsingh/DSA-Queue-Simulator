@@ -8,7 +8,7 @@ management system must handle the following scenarios:
     Vehicles at the junction are served equally from each lane. The system should ensure that vehicles are dispatched fairly.
 - #### High-Priority Condition:
     If one of the roads (referred to as the priority road) accumulates more than 10 waiting vehicles, that road should be served first until the count drops below 5. Afterward, normal conditions resume.
-  ![Path](https://github.com/SafalNarsingh/DSA-Queue-Simulator/blob/a75e5a131e348d0ad553fcb2b5056f5de0c625fc/imgs/path_visual.png)
+  ![Path](https://github.com/SafalNarsingh/DSA-Queue-Simulator/blob/d127f7b16f1197517f2fa9790130cfd8aac52990/imgs/path_visual.png)
 
 # Installation 
 To install and run the traffic simulator, follow these steps:
@@ -53,7 +53,10 @@ Make sure mingw and pthread, POSIX threads library for MinGW, are installed on y
 
 # Preview
 ### Road
-![Road Image](https://github.com/SafalNarsingh/DSA-Queue-Simulator/blob/d7c3b74629fdb9fe2711394e78b2f1b4715d5ef1/imgs/road.png)
+![Road Image](https://github.com/SafalNarsingh/DSA-Queue-Simulator/blob/d127f7b16f1197517f2fa9790130cfd8aac52990/imgs/road.png)
+
+### Traffic 
+![Traffic]()
 
 Here are some details of the Code:
 
