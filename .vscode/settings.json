@@ -3,6 +3,7 @@
         "*.sqlbook": "sql",
         "*.ndjson": "jsonl",
         "*.dbclient-js": "javascript",
-        "sdl.h": "c"
+        "sdl.h": "c",
+        "pthread.h": "c"
     }
 }
