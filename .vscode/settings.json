@@ -4,6 +4,7 @@
         "*.ndjson": "jsonl",
         "*.dbclient-js": "javascript",
         "sdl.h": "c",
-        "pthread.h": "c"
+        "pthread.h": "c",
+        "sdl_ttf.h": "c"
     }
 }
