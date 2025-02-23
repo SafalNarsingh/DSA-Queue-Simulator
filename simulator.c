@@ -21,6 +21,8 @@
 #define LEFT_TURN 1
 #define STRAIGHT 2
 #define RIGHT_TURN 3
+#define STOP_DISTANCE 175 // Distance from traffic light where vehicles should stop
+
 
 typedef struct {
     char id[9];        
@@ -32,6 +34,7 @@ typedef struct {
     int route_type;   
     char target_lane;  
     int target_sublane; 
+    SDL_Color color;
 } Vehicle;
 
 Vehicle vehicles[MAX_VEHICLES];
@@ -199,6 +202,11 @@ void spawnVehicle(const char* id, char lane, int sublane) {
             vehicles[i].sublane = sublane;
             vehicles[i].direction = (lane == 'A' || lane == 'C') ? 1 : -1;
             getLanePosition(lane, sublane, &vehicles[i].x, &vehicles[i].y);
+
+            // Initialize the color attribute
+            vehicles[i].color = (SDL_Color){rand() % 256, rand() % 256, rand() % 256, 255};
+
+
             printf("Spawned Vehicle: %s at lane %c, sublane %d\n", vehicles[i].id, lane, sublane);
             break;
         }
@@ -227,13 +235,13 @@ void* generateVehicles(void* arg) {
     }
     return NULL;
 }
-
 void updateVehicles() {
     SDL_LockMutex(vehicleMutex);
     for (int i = 0; i < MAX_VEHICLES; i++) {
         if (!vehicles[i].active) continue;
 
         bool canMove = true;
+        int choice = rand() % 2;
 
         // Check if there is a vehicle ahead in the same lane and sublane
         for (int j = 0; j < MAX_VEHICLES; j++) {
@@ -261,18 +269,33 @@ void updateVehicles() {
 
         switch (vehicles[i].lane) {
             case 'A': 
-                if (vehicles[i].sublane == 2 && !trafficLights[0].green && vehicles[i].x < WINDOW_WIDTH / 2 ) {
-                    continue; // Stop the vehicle if the light is red and in sublane 2, and the vehicle is behind the light by 20 units
+                if (vehicles[i].sublane == 2 && !trafficLights[0].green && vehicles[i].x >= (WINDOW_WIDTH / 2 - STOP_DISTANCE)) {
+                    continue; // Stop if light is red and vehicle is close enough
                 }
                 vehicles[i].x += VEHICLE_SPEED; // Move right
 
+                if (vehicles[i].sublane == 2 && vehicles[i].x >= WINDOW_WIDTH / 2 - 75) {
+                    if (choice == 0) {
+                        vehicles[i].y += VEHICLE_SPEED; // Move down towards D1
+                        if (vehicles[i].y >= WINDOW_HEIGHT / 2 + 75) {
+                            vehicles[i].lane = 'D'; // change the lane to D
+                            vehicles[i].sublane = 1;
+                        }
+                    } else {
+                        vehicles[i].y -= VEHICLE_SPEED; // Move up towards B3
+                        if (vehicles[i].y <= WINDOW_HEIGHT / 2 - 75) {
+                            vehicles[i].lane = 'B'; // change the lane to B
+                            vehicles[i].sublane = 3;
+                        }
+                    }
+                }
                 // **A1 should turn left into D1 smoothly**
                 if (vehicles[i].sublane == 1 && vehicles[i].x >= WINDOW_WIDTH / 2 - 75) {
                     printf("Turning left: Vehicle %s from A1 to D1\n", vehicles[i].id);
                     
                     // Start moving upward instead of continuing right
                     vehicles[i].y -= VEHICLE_SPEED; 
-
+                    
                     // If vehicle has reached the middle, switch lanes
                     if (vehicles[i].y <= WINDOW_HEIGHT / 2) {
                         vehicles[i].lane = 'D';
@@ -283,17 +306,33 @@ void updateVehicles() {
                 break;
 
             case 'B': 
-                if (vehicles[i].sublane == 2 && !trafficLights[1].green && vehicles[i].x > WINDOW_WIDTH / 2 + ROAD_WIDTH / 2 + 20) {
-                    continue; // Stop the vehicle if the light is red and in sublane 2, and the vehicle is behind the light by 20 units
+                if (vehicles[i].sublane == 2 && !trafficLights[1].green && vehicles[i].x <= (WINDOW_WIDTH / 2 + STOP_DISTANCE)) {
+                    continue; // Stop if light is red and vehicle is close enough
                 }
                 vehicles[i].x -= VEHICLE_SPEED; // Move left
+                
+                if (vehicles[i].sublane == 2 && vehicles[i].x <= WINDOW_WIDTH / 2 + 75) {
+                    if (choice == 0) {
+                        vehicles[i].y -= VEHICLE_SPEED; // Move up towards D1
+                        if (vehicles[i].y <= WINDOW_HEIGHT / 2 - 75) {
+                            vehicles[i].lane = 'D';
+                            vehicles[i].sublane = 1;
+                        }
+                    } else {
+                        vehicles[i].y += VEHICLE_SPEED; // Move down towards A3
+                        if (vehicles[i].y >= WINDOW_HEIGHT / 2 + 75) {
+                            vehicles[i].lane = 'A';
+                            vehicles[i].sublane = 3;
+                        }
+                    }
+                }
                 
                 // **B1 should turn left into C1 smoothly**
                 if (vehicles[i].sublane == 1 && vehicles[i].x <= WINDOW_WIDTH / 2 + 75) {
                     printf("Turning left: Vehicle %s from B1 to C1\n", vehicles[i].id);
                     
                     // Start moving downward instead of continuing left
-                    vehicles[i].y += VEHICLE_SPEED; 
+                    vehicles[i].y += VEHICLE_SPEED;                     
 
                     // If vehicle has reached the middle, switch lanes
                     if (vehicles[i].y >= WINDOW_HEIGHT / 2) {
@@ -305,10 +344,26 @@ void updateVehicles() {
                 break;
 
             case 'C': 
-                if (vehicles[i].sublane == 2 && !trafficLights[2].green && vehicles[i].y < WINDOW_HEIGHT / 2 - ROAD_WIDTH / 2 - 20) {
-                    continue; // Stop the vehicle if the light is red and in sublane 2, and the vehicle is behind the light by 20 units
+                if (vehicles[i].sublane == 2 && !trafficLights[2].green && vehicles[i].y >= (WINDOW_HEIGHT / 2 - STOP_DISTANCE)) {
+                    continue; // Stop if light is red and vehicle is close enough
                 }
                 vehicles[i].y += VEHICLE_SPEED; // Move down
+
+                if (vehicles[i].sublane == 2 && vehicles[i].y >= WINDOW_HEIGHT / 2 - 75) {
+                    if (choice == 0) {
+                        vehicles[i].x -= VEHICLE_SPEED; // Move left towards B3
+                        if (vehicles[i].x <= WINDOW_WIDTH / 2 - 75) {
+                            vehicles[i].lane = 'B';
+                            vehicles[i].sublane = 3;
+                        }
+                    } else {
+                        vehicles[i].x += VEHICLE_SPEED; // Move right towards A3
+                        if (vehicles[i].x >= WINDOW_WIDTH / 2 + 75) {
+                            vehicles[i].lane = 'A';
+                            vehicles[i].sublane = 3;
+                        }
+                    }
+                }
 
                 // **C3 should turn left into A3 smoothly**
                 if (vehicles[i].sublane == 3 && vehicles[i].y >= WINDOW_HEIGHT / 2 - 75) {
@@ -327,11 +382,26 @@ void updateVehicles() {
                 break;
 
             case 'D': 
-                if (vehicles[i].sublane == 2 && !trafficLights[3].green && vehicles[i].y > WINDOW_HEIGHT / 2 + ROAD_WIDTH / 2 + 20) {
-                    continue; // Stop the vehicle if the light is red and in sublane 2, and the vehicle is behind the light by 20 units
+                if (vehicles[i].sublane == 2 && !trafficLights[3].green && vehicles[i].y <= (WINDOW_HEIGHT / 2 + STOP_DISTANCE)) {
+                    continue; // Stop if light is red and vehicle is close enough
                 }
                 vehicles[i].y -= VEHICLE_SPEED; // Move up
-                
+
+                if (vehicles[i].sublane == 2 && vehicles[i].y <= WINDOW_HEIGHT / 2 + 75) {
+                    if (choice == 0) {
+                        vehicles[i].x += VEHICLE_SPEED; // Move right towards A1
+                        if (vehicles[i].x >= WINDOW_WIDTH / 2 + 75) {
+                            vehicles[i].lane = 'A';
+                            vehicles[i].sublane = 1;
+                        }
+                    } else {
+                        vehicles[i].x -= VEHICLE_SPEED; // Move left towards B1
+                        if (vehicles[i].x <= WINDOW_WIDTH / 2 - 75) {
+                            vehicles[i].lane = 'B';
+                            vehicles[i].sublane = 1;
+                        }
+                    }
+                }           
                 // **D3 should turn left into B3 smoothly**
                 if (vehicles[i].sublane == 3 && vehicles[i].y <= WINDOW_HEIGHT / 2 + 75) {
                     printf("Turning left: Vehicle %s from D3 to B3\n", vehicles[i].id);
@@ -340,7 +410,7 @@ void updateVehicles() {
                     vehicles[i].x -= VEHICLE_SPEED; 
 
                     // If vehicle has reached the middle, switch lanes
-                    if (vehicles[i].x <= WINDOW_WIDTH / 2) {
+                    if (vehicles[i].x <= WINDOW_WIDTH / 2 - 75) {
                         vehicles[i].lane = 'B';
                         vehicles[i].sublane = 3;
                         vehicles[i].direction = -1; // Move left in B3
@@ -373,24 +443,15 @@ void drawTrafficLights(SDL_Renderer* renderer) {
     }
 }
 
-// Update the drawVehicles function in simulator.c:
+// Update the drawVehicles function in simulator.c:void drawVehicles(SDL_Renderer* renderer) {
 void drawVehicles(SDL_Renderer* renderer) {
     SDL_LockMutex(vehicleMutex);
     for (int i = 0; i < MAX_VEHICLES; i++) {
         if (!vehicles[i].active) continue;
 
-        if(vehicles[i].sublane == 'A' ){
-            SDL_SetRenderDrawColor(renderer, 3, 189, 255, 1); // Blue color for all vehicles
-        }
-        else if(vehicles[i].lane == 'B' ){
-            SDL_SetRenderDrawColor(renderer, 255, 0, 60, 1); // Red color for all vehicles
-        }
-        else if(vehicles[i].lane == 'C' ){
-            SDL_SetRenderDrawColor(renderer, 5, 252, 113, 1); // Green color for all vehicles
-        }
-        else if(vehicles[i].lane == 'D' ){
-            SDL_SetRenderDrawColor(renderer, 255, 242, 0, 1); // Yellow color for all vehicles
-        }
+        // Use the color attribute
+        SDL_SetRenderDrawColor(renderer, vehicles[i].color.r, vehicles[i].color.g, vehicles[i].color.b, vehicles[i].color.a);
+
         SDL_Rect rect;
 
         if (vehicles[i].lane == 'A' || vehicles[i].lane == 'B') { 
