@@ -125,10 +125,8 @@ int peek(TrafficQueue* queue) {
     return queue->vehicleIndices[queue->front];
 }
 
-// Create a queue for each lane to track vehicles waiting at lights
-TrafficQueue laneQueues[NUM_LANES];
 
-TrafficLight trafficLights[4]; // One for each lane
+
 
 // Count the number of vehicles in each lane
 void countVehiclesPerLane(int laneQueue[], int sublane) {
