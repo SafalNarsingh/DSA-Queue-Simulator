@@ -1,0 +1,2 @@
+gcc -o simulator simulator.c -I./src/include -L./src/lib -lmingw32 -lSDL2main -lSDL2 -lSDL2_ttf -pthread (to compile the file)
+./simulator (to run the executable file)

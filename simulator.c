@@ -18,7 +18,7 @@
 #define VEHICLE_SIZE 40
 #define VEHICLE_LENGTH 60  
 #define MAX_VEHICLES 500   
-#define VEHICLE_SPEED 3
+#define VEHICLE_SPEED 4
 #define LEFT_TURN 1
 #define STRAIGHT 2
 #define RIGHT_TURN 3
@@ -41,6 +41,7 @@ typedef struct {
 } Vehicle;
 
 Vehicle vehicles[MAX_VEHICLES];
+
 SDL_mutex* vehicleMutex;
 
 
@@ -490,7 +491,7 @@ void spawnVehicle(const char* id, char lane, int sublane) {
             vehicles[i].choice = rand() % 2;
 
 
-            printf("Spawned Vehicle: %s at lane %c, sublane %d\n", vehicles[i].id, lane, sublane);
+            // printf("Spawned Vehicle: %s at lane %c, sublane %d\n", vehicles[i].id, lane, sublane);
             break;
         }
     }
@@ -515,7 +516,7 @@ void* generateVehicles(void* arg) {
         snprintf(vehicleID, 9, "V%03d", rand() % 1000);
 
         spawnVehicle(vehicleID, lanes[laneIndex], sublane);
-        usleep(800000); // Sleep for 0.8 seconds
+        SDL_Delay(800);
     }
     return NULL;
 }
@@ -593,7 +594,7 @@ void updateVehicles() {
                 }
                 // **A1 should turn left into D1 smoothly**
                 if (vehicles[i].sublane == 1 && vehicles[i].x <= WINDOW_WIDTH / 2 - 50 && vehicles[i].x >= WINDOW_WIDTH / 2 - 75) {
-                    printf("Turning left: Vehicle %s from A1 to D1\n", vehicles[i].id);
+                    // printf("Turning left: Vehicle %s from A1 to D1\n", vehicles[i].id);
                     
                     // Start moving upward instead of continuing right
                     vehicles[i].y -= VEHICLE_SPEED; 
@@ -631,7 +632,7 @@ void updateVehicles() {
                 }
                 // **B1 should turn left into C1 smoothly**
                 if (vehicles[i].sublane == 1 && vehicles[i].x <= WINDOW_WIDTH / 2 + 75) {
-                    printf("Turning left: Vehicle %s from B1 to C1\n", vehicles[i].id);
+                    // printf("Turning left: Vehicle %s from B1 to C1\n", vehicles[i].id);
                     
                     // Start moving downward instead of continuing left
                     vehicles[i].y += VEHICLE_SPEED;                     
@@ -669,7 +670,7 @@ void updateVehicles() {
                 }
                 // **C3 should turn left into A3 smoothly**
                 if (vehicles[i].sublane == 3 && vehicles[i].y >= WINDOW_HEIGHT / 2 - 75 && vehicles[i].y <= WINDOW_HEIGHT / 2 ) {
-                    printf("Turning left: Vehicle %s from C3 to A3\n", vehicles[i].id);
+                    // printf("Turning left: Vehicle %s from C3 to A3\n", vehicles[i].id);
                     
                     // Start moving right instead of continuing down
                     vehicles[i].x += VEHICLE_SPEED; 
@@ -709,7 +710,7 @@ void updateVehicles() {
 
                 // **D3 should turn left into B3 smoothly**
                 if (vehicles[i].sublane == 3 && vehicles[i].y <= WINDOW_HEIGHT / 2 + 75) {
-                    printf("Turning left: Vehicle %s from D3 to B3\n", vehicles[i].id);
+                    // printf("Turning left: Vehicle %s from D3 to B3\n", vehicles[i].id);
                     
                     // Start moving left instead of continuing up
                     vehicles[i].x -= VEHICLE_SPEED; 
@@ -725,6 +726,7 @@ void updateVehicles() {
         }
     }
     SDL_UnlockMutex(vehicleMutex);
+    SDL_Delay(16); // Approximately 60 updates per second
 }
 
 void drawTrafficLights(SDL_Renderer* renderer) {
@@ -988,7 +990,6 @@ bool initializeSDL(SDL_Window **window, SDL_Renderer **renderer);
 void drawRoadsAndLane(SDL_Renderer *renderer, TTF_Font *font);
 void displayText(SDL_Renderer *renderer, TTF_Font *font, char *text, int x, int y);
 void refreshLight(SDL_Renderer *renderer, SharedData* sharedData);
-void* chequeQueue(void* arg);
 void* readAndParseFile(void* arg);
 void* mainLoop(void* arg);
 
@@ -1108,9 +1109,12 @@ int main(int argc, char *argv[]) {
         
         // Cap the frame rate
         Uint32 frameTime = SDL_GetTicks() - currentTime;
-        if (frameTime < 16) {
-            SDL_Delay(16 - frameTime);  // Target ~60 FPS
+        Uint32 targetFrameTime = 16; // 60 FPS
+        Uint32 frameEndTime = SDL_GetTicks();
+        if (frameEndTime - currentTime < targetFrameTime) {
+            SDL_Delay(targetFrameTime - (frameEndTime - currentTime));
         }
+        
     }
     
     // Cleanup and shutdown
@@ -1308,14 +1312,4 @@ void displayText(SDL_Renderer *renderer, TTF_Font *font, char *text, int x, int 
     SDL_DestroyTexture(texture);
 }
 
-void* chequeQueue(void* arg){
-    SharedData* sharedData = (SharedData*)arg;
-    int i = 1;
-    while (1) {
-        sharedData->nextLight = 0;
-        sleep(5);
-        sharedData->nextLight = 2;
-        sleep(5);
-    }
-}
 
