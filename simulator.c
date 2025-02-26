@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h> 
+#include <math.h>
 
 #define WINDOW_WIDTH 1280
 #define MAIN_FONT "DejaVuSans.ttf"
@@ -16,13 +17,13 @@
 #define LANE_WIDTH 70   
 #define VEHICLE_SIZE 40
 #define VEHICLE_LENGTH 60  
-#define MAX_VEHICLES 200   
+#define MAX_VEHICLES 500   
 #define VEHICLE_SPEED 3
 #define LEFT_TURN 1
 #define STRAIGHT 2
 #define RIGHT_TURN 3
 #define STOP_DISTANCE 175 // Distance from traffic light where vehicles should stop
-#define MAX_QUEUE_SIZE 100 // Maximum size for our traffic queues
+#define MAX_QUEUE_SIZE 200 // Maximum size for our traffic queues
 #define NUM_LANES 4 // A, B, C, D lanes
 
 typedef struct {
@@ -248,76 +249,154 @@ void updateTrafficQueues() {
     SDL_UnlockMutex(vehicleMutex);
 
     // Debug: Print queue sizes
-    printf("Queue sizes after update: A:%d, B:%d, C:%d, D:%d\n", 
-           laneQueues[0].size, laneQueues[1].size, 
-           laneQueues[2].size, laneQueues[3].size);
+//     printf("Queue sizes after update: A:%d, B:%d, C:%d, D:%d\n", 
+//            laneQueues[0].size, laneQueues[1].size, 
+//            laneQueues[2].size, laneQueues[3].size);
+// 
 }
 
-void* updateTrafficLightsWithQueues(void* arg) {
-    int currentPriorityLane = -1;
-    int greenLightDuration = 0;
+
+// Helper function to calculate green light duration based on vehicle count
+int calculateGreenLightDuration(int vehicleCount) {
+    // Assume each vehicle takes approximately 2 seconds to clear the intersection
+    // Plus a base time of 3 seconds for the first vehicle
+    int baseTime = 3;
+    int timePerVehicle = 2;
+    
+    return baseTime + (vehicleCount * timePerVehicle);
+}
+
+void* updateTrafficLightsAdvanced(void* arg) {
+    int currentServingLane = -1;
+    time_t greenLightStartTime = 0;
+    int highestPriorityLane = -1;
+    int normalRotationDuration = 5; // 5 seconds per lane in normal rotation
+    time_t lastRotationTime = time(NULL);
+    
+    // All lanes are in sublane 2
+    int allLanes[4] = {0, 1, 2, 3}; // A2, B2, C2, D2
+    int numLanes = 4;
+    int lane_C_index = 2; // Lane C2 has special priority
     
     while (1) {
-
-
+        // Update our understanding of the traffic queues
         updateTrafficQueues();
-        sleep(3); // Check every 2 seconds
         
-        // Get queue sizes for debugging
-        printf("Queue sizes: A:%d, B:%d, C:%d, D:%d\n", 
+        // Log queue sizes for debugging
+        printf("Queue sizes: A2:%d, B2:%d, C2:%d, D2:%d\n", 
                laneQueues[0].size, laneQueues[1].size, 
                laneQueues[2].size, laneQueues[3].size);
         
-        // Check if we need to change the priority lane
-        bool needNewPriority = false;
+        // Lock mutex before modifying traffic light states
+        SDL_LockMutex(vehicleMutex);
         
-        // If current priority lane's queue is empty
-        if (currentPriorityLane == -1 || laneQueues[currentPriorityLane].size == 0) {
-            needNewPriority = true;
+        // Check for priority conditions
+        bool anyHighPriority = false;
+        highestPriorityLane = -1;
+        
+        // First check if C2 has more than 5 vehicles - it gets absolute priority
+        if (laneQueues[lane_C_index].size > 5) {
+            highestPriorityLane = lane_C_index;
+            anyHighPriority = true;
+            printf("Lane C2 has highest priority with %d vehicles\n", laneQueues[lane_C_index].size);
         }
-        
-        // If green light has been on for a very long time (safety measure)
-        if (greenLightDuration >= 10) {
-            needNewPriority = true;
-        }
-        
-        // If we need a new priority lane
-        if (needNewPriority) {
-            // Find lane with at least 10 vehicles waiting
-            int maxQueueSize = 0;
-            int maxQueueLane = -1;
+        // If C2 doesn't have priority, check other lanes
+        else {
+            int maxVehicles = 5; // Threshold for high priority
             
-            for (int i = 0; i < NUM_LANES; i++) {
-                // Only consider lanes with at least 10 vehicles
-                if (laneQueues[i].size >= 10 && laneQueues[i].size > maxQueueSize) {
-                    maxQueueSize = laneQueues[i].size;
-                    maxQueueLane = i;
+            // Find lane with most vehicles (above threshold)
+            for (int i = 0; i < numLanes; i++) {
+                // Skip C2 as we already checked it
+                if (i == lane_C_index) continue;
+                
+                if (laneQueues[i].size > maxVehicles) {
+                    maxVehicles = laneQueues[i].size;
+                    highestPriorityLane = i;
+                    anyHighPriority = true;
                 }
             }
             
-            // Only switch if there's a lane with at least 10 vehicles waiting
-            if (maxQueueLane != -1) {
-                // Set all lights to red
-                SDL_LockMutex(vehicleMutex);
-                for (int i = 0; i < 4; i++) {
+            if (anyHighPriority) {
+                printf("Lane %c2 has priority with %d vehicles\n", 
+                       'A' + highestPriorityLane, laneQueues[highestPriorityLane].size);
+            }
+        }
+        
+        // Handle high priority mode
+        if (anyHighPriority) {
+            // Set all lights to red
+            for (int i = 0; i < numLanes; i++) {
+                trafficLights[i].green = false;
+            }
+            
+            // Give green light to priority lane
+            trafficLights[highestPriorityLane].green = true;
+            currentServingLane = highestPriorityLane;
+            
+            // Reset normal rotation timing
+            lastRotationTime = time(NULL);
+            
+            printf("HIGH PRIORITY MODE: Lane %c2 gets green light\n", 'A' + highestPriorityLane);
+        }
+        // Handle normal mode (no high priority lanes)
+        else {
+            time_t currentTime = time(NULL);
+            
+            // Check if current lane's green light duration is over or if we need to select a lane
+            if (currentServingLane == -1 || 
+                currentTime - lastRotationTime >= normalRotationDuration ||
+                laneQueues[currentServingLane].size == 0) {
+                
+                // Set all lights to red first
+                for (int i = 0; i < numLanes; i++) {
                     trafficLights[i].green = false;
                 }
                 
-                // Set new priority lane to green
-                trafficLights[maxQueueLane].green = true;
-                currentPriorityLane = maxQueueLane;
-                SDL_UnlockMutex(vehicleMutex);
-                greenLightDuration = 0;
+                // Find lanes with vehicles waiting
+                int lanesWithVehicles[numLanes];
+                int numLanesWithVehicles = 0;
                 
-                printf("Switching green light to lane %c (queue size: %d)\n", 
-                       'A' + maxQueueLane, maxQueueSize);
+                for (int i = 0; i < numLanes; i++) {
+                    if (laneQueues[i].size > 0) {
+                        lanesWithVehicles[numLanesWithVehicles++] = i;
+                    }
+                }
+                
+                // If there are lanes with vehicles
+                if (numLanesWithVehicles > 0) {
+                    // Find lane with most waiting vehicles
+                    int maxWaitingLane = lanesWithVehicles[0];
+                    int maxWaitingCount = laneQueues[maxWaitingLane].size;
+                    
+                    for (int i = 1; i < numLanesWithVehicles; i++) {
+                        int laneIndex = lanesWithVehicles[i];
+                        if (laneQueues[laneIndex].size > maxWaitingCount) {
+                            maxWaitingCount = laneQueues[laneIndex].size;
+                            maxWaitingLane = laneIndex;
+                        }
+                    }
+                    
+                    // Set the selected lane to green
+                    trafficLights[maxWaitingLane].green = true;
+                    currentServingLane = maxWaitingLane;
+                    lastRotationTime = currentTime;
+                    
+                    printf("NORMAL MODE: Serving lane %c2 with %d vehicles (highest count)\n", 
+                           'A' + maxWaitingLane, laneQueues[maxWaitingLane].size);
+                } else {
+                    // No vehicles waiting in any lane
+                    currentServingLane = -1;
+                    printf("No vehicles waiting in any lane\n");
+                }
             }
-        } else {
-            greenLightDuration++;
         }
         
-       
+        SDL_UnlockMutex(vehicleMutex);
+        
+        // Check every second
+        sleep(1);
     }
+    
     return NULL;
 }
 
@@ -432,7 +511,7 @@ void* generateVehicles(void* arg) {
         snprintf(vehicleID, 9, "V%03d", rand() % 1000);
 
         spawnVehicle(vehicleID, lanes[laneIndex], sublane);
-        sleep(2);
+        usleep(500000); // Sleep for 0.5 seconds
     }
     return NULL;
 }
@@ -471,7 +550,7 @@ void updateVehicles() {
 
         switch (vehicles[i].lane) {
             case 'A': 
-                if (vehicles[i].sublane == 2 && !trafficLights[0].green && vehicles[i].x >= (WINDOW_WIDTH / 2 - STOP_DISTANCE)) {
+                if (vehicles[i].sublane == 2 && !trafficLights[0].green && vehicles[i].x >= (WINDOW_WIDTH / 2 - STOP_DISTANCE) && vehicles[i].x < (WINDOW_WIDTH / 2) - 150) {
                     continue; // Stop if light is red and vehicle is close enough
                 }
                 vehicles[i].x += VEHICLE_SPEED; // Move right
@@ -500,7 +579,7 @@ void updateVehicles() {
                 break;
 
             case 'B': 
-                if (vehicles[i].sublane == 2 && !trafficLights[1].green && vehicles[i].x <= (WINDOW_WIDTH / 2 + STOP_DISTANCE)) {
+                if (vehicles[i].sublane == 2 && !trafficLights[1].green && vehicles[i].x <= (WINDOW_WIDTH / 2 + STOP_DISTANCE) && vehicles[i].x > (WINDOW_WIDTH / 2) + 150) {
                     continue; // Stop if light is red and vehicle is close enough
                 }
                 vehicles[i].x -= VEHICLE_SPEED; // Move left
@@ -530,7 +609,7 @@ void updateVehicles() {
                 break;
 
             case 'C': 
-                if (vehicles[i].sublane == 2 && !trafficLights[2].green && vehicles[i].y >= (WINDOW_HEIGHT / 2 - STOP_DISTANCE)) {
+                if (vehicles[i].sublane == 2 && !trafficLights[2].green && vehicles[i].y >= (WINDOW_HEIGHT / 2 - STOP_DISTANCE) && vehicles[i].y < (WINDOW_HEIGHT / 2) - 150) {
                     continue; // Stop if light is red and vehicle is close enough
                 }
                 vehicles[i].y += VEHICLE_SPEED; // Move down
@@ -556,10 +635,11 @@ void updateVehicles() {
                         vehicles[i].direction = 1; // Move right in A3
                     }
                 }
+
                 break;
 
             case 'D': 
-                if (vehicles[i].sublane == 2 && !trafficLights[3].green && vehicles[i].y <= (WINDOW_HEIGHT / 2 + STOP_DISTANCE)) {
+                if (vehicles[i].sublane == 2 && !trafficLights[3].green && vehicles[i].y <= (WINDOW_HEIGHT / 2 + STOP_DISTANCE) && vehicles[i].y > (WINDOW_HEIGHT / 2) + 150) {
                     continue; // Stop if light is red and vehicle is close enough
                 }
                 vehicles[i].y -= VEHICLE_SPEED; // Move up
@@ -598,8 +678,8 @@ void drawTrafficLights(SDL_Renderer* renderer) {
     SDL_Rect lights[4] = {
         { center_x - ROAD_WIDTH / 2 - 30, center_y - 20, 20, 40 }, // A ->
         { center_x + ROAD_WIDTH / 2 , center_y - 15 , 20, 40 }, // B |
-        { center_x - 12, center_y -ROAD_WIDTH / 2 - 5, 40, 20 }, // C ^
-        { center_x - 12, center_y + ROAD_WIDTH / 2 + 10, 40, 20 }  // D <-
+        { center_x - 15, center_y -ROAD_WIDTH / 2 - 5, 40, 20 }, // C ^
+        { center_x - 15, center_y + ROAD_WIDTH / 2 + 10, 40, 20 }  // D <-
     };
     
     for (int i = 0; i < 4; i++) {
@@ -670,39 +750,122 @@ void drawQueueVisualization(SDL_Renderer* renderer) {
 }
 
 // Update the drawVehicles function in simulator.c:void drawVehicles(SDL_Renderer* renderer) {
-void drawVehicles(SDL_Renderer* renderer) {
-    SDL_LockMutex(vehicleMutex);
-    for (int i = 0; i < MAX_VEHICLES; i++) {
-        if (!vehicles[i].active) continue;
-
-        // Use the color attribute
-        SDL_SetRenderDrawColor(renderer, vehicles[i].color.r, vehicles[i].color.g, vehicles[i].color.b, vehicles[i].color.a);
-
-        SDL_Rect rect;
-
-        if (vehicles[i].lane == 'A' || vehicles[i].lane == 'B') { 
-            // Vehicles moving horizontally (left/right)
-            rect = (SDL_Rect){
-                vehicles[i].x - VEHICLE_LENGTH / 2, 
-                vehicles[i].y - VEHICLE_SIZE / 2, 
-                VEHICLE_LENGTH,
-                VEHICLE_SIZE
-            };
-        } else {  
-            // Vehicles moving vertically (up/down)
-            rect = (SDL_Rect){
-                vehicles[i].x - VEHICLE_SIZE / 2 + 5, 
-                vehicles[i].y - VEHICLE_LENGTH / 2, 
-                VEHICLE_SIZE,
-                VEHICLE_LENGTH
-            };
+    void drawVehicles(SDL_Renderer* renderer) {
+        SDL_LockMutex(vehicleMutex);
+        for (int i = 0; i < MAX_VEHICLES; i++) {
+            if (!vehicles[i].active) continue;
+    
+            // Use the color attribute
+            SDL_SetRenderDrawColor(renderer, vehicles[i].color.r, vehicles[i].color.g, vehicles[i].color.b, vehicles[i].color.a);
+    
+            SDL_Rect carBody;
+            SDL_Rect carWindow;
+            SDL_Rect carWheel1, carWheel2, carWheel3, carWheel4;
+    
+            if (vehicles[i].lane == 'A' || vehicles[i].lane == 'B') { 
+                // Vehicles moving horizontally (left/right)
+                carBody = (SDL_Rect){
+                    vehicles[i].x - VEHICLE_LENGTH / 2, 
+                    vehicles[i].y - VEHICLE_SIZE / 2, 
+                    VEHICLE_LENGTH,
+                    VEHICLE_SIZE
+                };
+    
+                carWindow = (SDL_Rect){
+                    vehicles[i].x - VEHICLE_LENGTH / 4, 
+                    vehicles[i].y - VEHICLE_SIZE / 4, 
+                    VEHICLE_LENGTH / 2,
+                    VEHICLE_SIZE / 2
+                };
+    
+                carWheel1 = (SDL_Rect){
+                    vehicles[i].x - VEHICLE_LENGTH / 2 + 5, 
+                    vehicles[i].y - VEHICLE_SIZE / 2 - 5, 
+                    10, 
+                    10
+                };
+    
+                carWheel2 = (SDL_Rect){
+                    vehicles[i].x + VEHICLE_LENGTH / 2 - 15, 
+                    vehicles[i].y - VEHICLE_SIZE / 2 - 5, 
+                    10, 
+                    10
+                };
+    
+                carWheel3 = (SDL_Rect){
+                    vehicles[i].x - VEHICLE_LENGTH / 2 + 5, 
+                    vehicles[i].y + VEHICLE_SIZE / 2 - 5, 
+                    10, 
+                    10
+                };
+    
+                carWheel4 = (SDL_Rect){
+                    vehicles[i].x + VEHICLE_LENGTH / 2 - 15, 
+                    vehicles[i].y + VEHICLE_SIZE / 2 - 5, 
+                    10, 
+                    10
+                };
+            } else {  
+                // Vehicles moving vertically (up/down)
+                carBody = (SDL_Rect){
+                    vehicles[i].x - VEHICLE_SIZE / 2 + 5, 
+                    vehicles[i].y - VEHICLE_LENGTH / 2, 
+                    VEHICLE_SIZE,
+                    VEHICLE_LENGTH
+                };
+    
+                carWindow = (SDL_Rect){
+                    vehicles[i].x - VEHICLE_SIZE / 4 + 5, 
+                    vehicles[i].y - VEHICLE_LENGTH / 4, 
+                    VEHICLE_SIZE / 2,
+                    VEHICLE_LENGTH / 2
+                };
+    
+                carWheel1 = (SDL_Rect){
+                    vehicles[i].x - VEHICLE_SIZE / 2 , 
+                    vehicles[i].y - VEHICLE_LENGTH / 2 + 5, 
+                    10, 
+                    10
+                };
+    
+                carWheel2 = (SDL_Rect){
+                    vehicles[i].x + VEHICLE_SIZE / 2 , 
+                    vehicles[i].y - VEHICLE_LENGTH / 2 + 5, 
+                    10, 
+                    10
+                };
+    
+                carWheel3 = (SDL_Rect){
+                    vehicles[i].x - VEHICLE_SIZE / 2 , 
+                    vehicles[i].y + VEHICLE_LENGTH / 2 - 15, 
+                    10, 
+                    10
+                };
+    
+                carWheel4 = (SDL_Rect){
+                    vehicles[i].x + VEHICLE_SIZE / 2 , 
+                    vehicles[i].y + VEHICLE_LENGTH / 2 - 15, 
+                    10, 
+                    10
+                };
+            }
+    
+            // Draw car body
+            SDL_RenderFillRect(renderer, &carBody);
+    
+            // Draw car window
+            SDL_SetRenderDrawColor(renderer, 200, 200, 200, 255); // Light gray for windows
+            SDL_RenderFillRect(renderer, &carWindow);
+    
+            // Draw car wheels
+            SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255); // Black for wheels
+            SDL_RenderFillRect(renderer, &carWheel1);
+            SDL_RenderFillRect(renderer, &carWheel2);
+            SDL_RenderFillRect(renderer, &carWheel3);
+            SDL_RenderFillRect(renderer, &carWheel4);
         }
-
-        SDL_RenderFillRect(renderer, &rect);
-    }
-    SDL_UnlockMutex(vehicleMutex);
+        SDL_UnlockMutex(vehicleMutex);
 }
-
 
 void* readAndParseFile(void* arg) {
     printf("Reading vehicle data...\n");
@@ -802,7 +965,7 @@ int main(int argc, char *argv[]) {
         return -1;
     }
     
-    if (pthread_create(&trafficThread, NULL, updateTrafficLightsWithQueues, NULL) != 0) {
+    if (pthread_create(&trafficThread, NULL, updateTrafficLightsAdvanced, NULL) != 0) {
         SDL_Log("Failed to create traffic light thread");
         // Cancel the vehicle thread
         pthread_cancel(vehicleThread);
@@ -1035,22 +1198,34 @@ void drawRoadsAndLane(SDL_Renderer *renderer, TTF_Font *font) {
             }
         }
     }
+
+    if (font) {
+        displayText(renderer, font, "Lane A", 10, (WINDOW_HEIGHT - ROAD_WIDTH) / 2 - 30);
+        displayText(renderer, font, "Lane B", WINDOW_WIDTH - 100, (WINDOW_HEIGHT - ROAD_WIDTH) / 2 - 30);
+        displayText(renderer, font, "Lane C", (WINDOW_WIDTH - ROAD_WIDTH) / 2 - 90, 5);
+        displayText(renderer, font, "Lane D", (WINDOW_WIDTH - ROAD_WIDTH) / 2 + 220, WINDOW_HEIGHT - 30);
+        displayText(renderer, font, "A - ", 15, (WINDOW_HEIGHT - ROAD_WIDTH) / 2 - 207);
+        displayText(renderer, font, "C - ", 15, (WINDOW_HEIGHT - ROAD_WIDTH) / 2 - 178);
+        displayText(renderer, font, "B - ", (WINDOW_HEIGHT - ROAD_WIDTH) + 560, (WINDOW_HEIGHT - ROAD_WIDTH) / 2 - 207);
+        displayText(renderer, font, "D - ", (WINDOW_HEIGHT - ROAD_WIDTH) + 560, (WINDOW_HEIGHT - ROAD_WIDTH) / 2 - 178);
+    }
 }
 
 
 void displayText(SDL_Renderer *renderer, TTF_Font *font, char *text, int x, int y){
     // display necessary text
-    SDL_Color textColor = {0, 0, 0, 255}; // black color
+    SDL_Color textColor = {255, 255, 255, 255}; // white color
     SDL_Surface *textSurface = TTF_RenderText_Solid(font, text, textColor);
     SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, textSurface);
     SDL_FreeSurface(textSurface);
     SDL_Rect textRect = {x,y,0,0 };
     SDL_QueryTexture(texture, NULL, NULL, &textRect.w, &textRect.h);
-    SDL_Log("DIM of SDL_Rect %d %d %d %d", textRect.x, textRect.y, textRect.h, textRect.w);
+    // SDL_Log("DIM of SDL_Rect %d %d %d %d", textRect.x, textRect.y, textRect.h, textRect.w);
     // SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
     // SDL_Log("TTF_Error: %s\n", TTF_GetError());
     SDL_RenderCopy(renderer, texture, NULL, &textRect);
     // SDL_Log("TTF_Error: %s\n", TTF_GetError());
+    SDL_DestroyTexture(texture);
 }
 
 void* chequeQueue(void* arg){
