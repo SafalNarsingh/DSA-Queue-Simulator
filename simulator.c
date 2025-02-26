@@ -36,6 +36,7 @@ typedef struct {
     int route_type;   
     char target_lane;  
     int target_sublane; 
+    int choice;
     SDL_Color color;
 } Vehicle;
 
@@ -486,6 +487,8 @@ void spawnVehicle(const char* id, char lane, int sublane) {
 
             // Initialize the color attribute
             vehicles[i].color = (SDL_Color){rand() % 256, rand() % 256, rand() % 256, 255};
+            vehicles[i].choice = rand() % 2;
+
 
             printf("Spawned Vehicle: %s at lane %c, sublane %d\n", vehicles[i].id, lane, sublane);
             break;
@@ -502,6 +505,7 @@ void* generateVehicles(void* arg) {
         int laneIndex = rand() % 4;
         int sublane = (rand() % 3) + 1;
 
+
         // Prevent spawning in `A3` and `D1`
         if ((lanes[laneIndex] == 'A' && sublane == 3) ||(lanes[laneIndex] == 'B' && sublane == 3) || (lanes[laneIndex] == 'D' && sublane == 1) || (lanes[laneIndex] == 'C' && sublane == 1)) {
             continue; // Skip this iteration
@@ -511,14 +515,23 @@ void* generateVehicles(void* arg) {
         snprintf(vehicleID, 9, "V%03d", rand() % 1000);
 
         spawnVehicle(vehicleID, lanes[laneIndex], sublane);
-        usleep(500000); // Sleep for 0.5 seconds
+        usleep(800000); // Sleep for 0.8 seconds
     }
     return NULL;
 }
 
+//for curve turn from A2 to C3
+void calculateBezierCurve(int x0, int y0, int x1, int y1, int x2, int y2, float t, int* x, int* y) {
+    float u = 1 - t;
+    float tt = t * t;
+    float uu = u * u;
+
+    *x = uu * x0 + 2 * u * t * x1 + tt * x2;
+    *y = uu * y0 + 2 * u * t * y1 + tt * y2;
+}
+
 void updateVehicles() {
     SDL_LockMutex(vehicleMutex);
-    int choice = rand() % 2;
     for (int i = 0; i < MAX_VEHICLES; i++) {
         if (!vehicles[i].active) continue;
 
@@ -556,10 +569,26 @@ void updateVehicles() {
                 vehicles[i].x += VEHICLE_SPEED; // Move right
 
                 if (vehicles[i].sublane == 2 && vehicles[i].x >= WINDOW_WIDTH / 2 - 75) {
-                    vehicles[i].y -=  VEHICLE_SPEED;  // Move smoothly up or down
-                    if (vehicles[i].y <= WINDOW_HEIGHT / 2 - 72 ) {
-                        vehicles[i].lane = 'A'; // Change the lane to either C3 or A1
-                        vehicles[i].sublane =  1;
+                    if (vehicles[i].choice == 0){
+                        vehicles[i].y -=  VEHICLE_SPEED;  // Move smoothly up or down
+                        if (vehicles[i].y <= WINDOW_HEIGHT / 2 - 72 ) {
+                            vehicles[i].lane = 'A'; // Change the lane to either C3 or A1
+                            vehicles[i].sublane =  1;
+                        }
+                    }
+                    else{
+                        // Calculate the Bezier curve points for the turn
+                        int x, y;
+                        float t = (float)(vehicles[i].x - (WINDOW_WIDTH / 2 - 75)) / 150.0f;
+                        // Adjust control points to be slightly above the turn
+                        calculateBezierCurve(WINDOW_WIDTH / 2 - 75, vehicles[i].y, WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2 - 20, WINDOW_WIDTH / 2 + 75, WINDOW_HEIGHT / 2 + 150, t, &x, &y);
+                        vehicles[i].x = x;
+                        vehicles[i].y = y;
+
+                        if (t >= 1.0f) {
+                            vehicles[i].lane = 'C'; // Change the lane to C3
+                            vehicles[i].sublane = 3;
+                        }
                     }
                 }
                 // **A1 should turn left into D1 smoothly**
@@ -583,15 +612,23 @@ void updateVehicles() {
                     continue; // Stop if light is red and vehicle is close enough
                 }
                 vehicles[i].x -= VEHICLE_SPEED; // Move left
-            
-                if (vehicles[i].sublane == 2 && vehicles[i].x <= WINDOW_WIDTH / 2 + 75) {
-                    vehicles[i].y += (vehicles[i].direction == 1) ? -VEHICLE_SPEED : VEHICLE_SPEED; // Move smoothly up or down
-                    if (vehicles[i].y <= WINDOW_HEIGHT / 2 - 75 || vehicles[i].y >= WINDOW_HEIGHT / 2 + 75) {
-                        vehicles[i].lane = 'B'; // Change the lane to either B3 or D1
-                        vehicles[i].sublane = 3;
+                
+                if (vehicles[i].sublane == 2 && vehicles[i].x <= WINDOW_WIDTH / 2 ) {
+                    if (vehicles[i].choice == 0){
+                        vehicles[i].y += VEHICLE_SPEED; // Move smoothly up or down
+                        if (vehicles[i].y <= WINDOW_HEIGHT / 2 - 75 || vehicles[i].y >= WINDOW_HEIGHT / 2 + 75) {
+                            vehicles[i].lane = 'B'; // Change the lane to either B3 or D1
+                            vehicles[i].sublane = 3;
+                        }
+                 }
+                    else{
+                        vehicles[i].y -=  VEHICLE_SPEED;  // Move smoothly up or down
+                        if (vehicles[i].y <= WINDOW_HEIGHT / 2 - 75 ) {
+                            vehicles[i].lane = 'D'; // Change the lane to either C3 or A1
+                            vehicles[i].sublane =  1;
+                        }
                     }
                 }
-                
                 // **B1 should turn left into C1 smoothly**
                 if (vehicles[i].sublane == 1 && vehicles[i].x <= WINDOW_WIDTH / 2 + 75) {
                     printf("Turning left: Vehicle %s from B1 to C1\n", vehicles[i].id);
@@ -615,14 +652,23 @@ void updateVehicles() {
                 vehicles[i].y += VEHICLE_SPEED; // Move down
 
                 if (vehicles[i].sublane == 2 && vehicles[i].y >= WINDOW_HEIGHT / 2  ) {
-                    vehicles[i].x -=  VEHICLE_SPEED; // Move smoothly left 
-                    if (vehicles[i].x <= WINDOW_WIDTH / 2 - 75) {
-                        vehicles[i].lane = 'B'; // Change the lane to either C3 or B3
+                        if(vehicles[i].choice == 0){
+                            vehicles[i].x -=  VEHICLE_SPEED; // Move smoothly left 
+                            if (vehicles[i].x <= WINDOW_WIDTH / 2 - 75) {
+                                vehicles[i].lane = 'B'; // Change the lane to either C3 or B3
+                                vehicles[i].sublane = 3;
+                            }
+                    }
+                    else{
+                    vehicles[i].x +=  VEHICLE_SPEED; // Move smoothly left 
+                    if (vehicles[i].x >= WINDOW_WIDTH / 2 + 75) {
+                        vehicles[i].lane = 'C'; // Change the lane to either C3 or B3
                         vehicles[i].sublane = 3;
                     }
+                 }
                 }
                 // **C3 should turn left into A3 smoothly**
-                if (vehicles[i].sublane == 3 && vehicles[i].y >= WINDOW_HEIGHT / 2 - 75) {
+                if (vehicles[i].sublane == 3 && vehicles[i].y >= WINDOW_HEIGHT / 2 - 75 && vehicles[i].y <= WINDOW_HEIGHT / 2 ) {
                     printf("Turning left: Vehicle %s from C3 to A3\n", vehicles[i].id);
                     
                     // Start moving right instead of continuing down
@@ -631,7 +677,7 @@ void updateVehicles() {
                     // If vehicle has reached the middle, switch lanes
                     if (vehicles[i].x >= WINDOW_WIDTH / 2) {
                         vehicles[i].lane = 'A';
-                        vehicles[i].sublane = 3;
+                        vehicles[i].sublane = 1;
                         vehicles[i].direction = 1; // Move right in A3
                     }
                 }
@@ -645,12 +691,22 @@ void updateVehicles() {
                 vehicles[i].y -= VEHICLE_SPEED; // Move up
 
                 if (vehicles[i].sublane == 2 && vehicles[i].y <= WINDOW_HEIGHT / 2 ) {
-                    vehicles[i].x += -VEHICLE_SPEED; // Move smoothly left  
-                    if (vehicles[i].x >= WINDOW_WIDTH / 2 + 75 || vehicles[i].x <= WINDOW_WIDTH / 2 - 75) {
-                        vehicles[i].lane = 'D'; // Change the lane either D1 or A1
-                        vehicles[i].sublane =  1;
+                    if(vehicles[i].choice == 0){
+                        vehicles[i].x += -VEHICLE_SPEED; // Move smoothly left  
+                        if (vehicles[i].x >= WINDOW_WIDTH / 2 + 75 || vehicles[i].x <= WINDOW_WIDTH / 2 - 75) {
+                            vehicles[i].lane = 'D'; // Change the lane either D1 or A1
+                            vehicles[i].sublane =  1;
+                        }
+                    }
+                    else{
+                        vehicles[i].x +=  VEHICLE_SPEED; // Move smoothly left 
+                        if (vehicles[i].x >= WINDOW_WIDTH / 2 + 75) {
+                            vehicles[i].lane = 'A'; // Change the lane to either D1 or A1
+                            vehicles[i].sublane =  1;
+                        }
                     }
                 }
+
                 // **D3 should turn left into B3 smoothly**
                 if (vehicles[i].sublane == 3 && vehicles[i].y <= WINDOW_HEIGHT / 2 + 75) {
                     printf("Turning left: Vehicle %s from D3 to B3\n", vehicles[i].id);
@@ -749,122 +805,146 @@ void drawQueueVisualization(SDL_Renderer* renderer) {
     }
 }
 
-// Update the drawVehicles function in simulator.c:void drawVehicles(SDL_Renderer* renderer) {
-    void drawVehicles(SDL_Renderer* renderer) {
-        SDL_LockMutex(vehicleMutex);
-        for (int i = 0; i < MAX_VEHICLES; i++) {
-            if (!vehicles[i].active) continue;
-    
-            // Use the color attribute
-            SDL_SetRenderDrawColor(renderer, vehicles[i].color.r, vehicles[i].color.g, vehicles[i].color.b, vehicles[i].color.a);
-    
-            SDL_Rect carBody;
-            SDL_Rect carWindow;
-            SDL_Rect carWheel1, carWheel2, carWheel3, carWheel4;
-    
-            if (vehicles[i].lane == 'A' || vehicles[i].lane == 'B') { 
-                // Vehicles moving horizontally (left/right)
-                carBody = (SDL_Rect){
-                    vehicles[i].x - VEHICLE_LENGTH / 2, 
-                    vehicles[i].y - VEHICLE_SIZE / 2, 
-                    VEHICLE_LENGTH,
-                    VEHICLE_SIZE
-                };
-    
-                carWindow = (SDL_Rect){
-                    vehicles[i].x - VEHICLE_LENGTH / 4, 
-                    vehicles[i].y - VEHICLE_SIZE / 4, 
-                    VEHICLE_LENGTH / 2,
-                    VEHICLE_SIZE / 2
-                };
-    
-                carWheel1 = (SDL_Rect){
-                    vehicles[i].x - VEHICLE_LENGTH / 2 + 5, 
-                    vehicles[i].y - VEHICLE_SIZE / 2 - 5, 
-                    10, 
-                    10
-                };
-    
-                carWheel2 = (SDL_Rect){
-                    vehicles[i].x + VEHICLE_LENGTH / 2 - 15, 
-                    vehicles[i].y - VEHICLE_SIZE / 2 - 5, 
-                    10, 
-                    10
-                };
-    
-                carWheel3 = (SDL_Rect){
-                    vehicles[i].x - VEHICLE_LENGTH / 2 + 5, 
-                    vehicles[i].y + VEHICLE_SIZE / 2 - 5, 
-                    10, 
-                    10
-                };
-    
-                carWheel4 = (SDL_Rect){
-                    vehicles[i].x + VEHICLE_LENGTH / 2 - 15, 
-                    vehicles[i].y + VEHICLE_SIZE / 2 - 5, 
-                    10, 
-                    10
-                };
-            } else {  
-                // Vehicles moving vertically (up/down)
-                carBody = (SDL_Rect){
-                    vehicles[i].x - VEHICLE_SIZE / 2 + 5, 
-                    vehicles[i].y - VEHICLE_LENGTH / 2, 
-                    VEHICLE_SIZE,
-                    VEHICLE_LENGTH
-                };
-    
-                carWindow = (SDL_Rect){
-                    vehicles[i].x - VEHICLE_SIZE / 4 + 5, 
-                    vehicles[i].y - VEHICLE_LENGTH / 4, 
-                    VEHICLE_SIZE / 2,
-                    VEHICLE_LENGTH / 2
-                };
-    
-                carWheel1 = (SDL_Rect){
-                    vehicles[i].x - VEHICLE_SIZE / 2 , 
-                    vehicles[i].y - VEHICLE_LENGTH / 2 + 5, 
-                    10, 
-                    10
-                };
-    
-                carWheel2 = (SDL_Rect){
-                    vehicles[i].x + VEHICLE_SIZE / 2 , 
-                    vehicles[i].y - VEHICLE_LENGTH / 2 + 5, 
-                    10, 
-                    10
-                };
-    
-                carWheel3 = (SDL_Rect){
-                    vehicles[i].x - VEHICLE_SIZE / 2 , 
-                    vehicles[i].y + VEHICLE_LENGTH / 2 - 15, 
-                    10, 
-                    10
-                };
-    
-                carWheel4 = (SDL_Rect){
-                    vehicles[i].x + VEHICLE_SIZE / 2 , 
-                    vehicles[i].y + VEHICLE_LENGTH / 2 - 15, 
-                    10, 
-                    10
-                };
+void drawRoundedRect(SDL_Renderer* renderer, SDL_Rect* rect, int radius) {
+    // Draw the central rectangle
+    SDL_Rect centralRect = {rect->x + radius, rect->y, rect->w - 2 * radius, rect->h};
+    SDL_RenderFillRect(renderer, &centralRect);
+
+    // Draw the left and right rectangles
+    SDL_Rect leftRect = {rect->x, rect->y + radius, radius, rect->h - 2 * radius};
+    SDL_RenderFillRect(renderer, &leftRect);
+    SDL_Rect rightRect = {rect->x + rect->w - radius, rect->y + radius, radius, rect->h - 2 * radius};
+    SDL_RenderFillRect(renderer, &rightRect);
+
+    // Draw the four corner circles
+    for (int w = 0; w < radius * 2; w++) {
+        for (int h = 0; h < radius * 2; h++) {
+            int dx = radius - w; // horizontal offset
+            int dy = radius - h; // vertical offset
+            if ((dx*dx + dy*dy) <= (radius * radius)) {
+                SDL_RenderDrawPoint(renderer, rect->x + radius + dx, rect->y + radius + dy); // top-left
+                SDL_RenderDrawPoint(renderer, rect->x + rect->w - radius + dx, rect->y + radius + dy); // top-right
+                SDL_RenderDrawPoint(renderer, rect->x + radius + dx, rect->y + rect->h - radius + dy); // bottom-left
+                SDL_RenderDrawPoint(renderer, rect->x + rect->w - radius + dx, rect->y + rect->h - radius + dy); // bottom-right
             }
-    
-            // Draw car body
-            SDL_RenderFillRect(renderer, &carBody);
-    
-            // Draw car window
-            SDL_SetRenderDrawColor(renderer, 200, 200, 200, 255); // Light gray for windows
-            SDL_RenderFillRect(renderer, &carWindow);
-    
-            // Draw car wheels
-            SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255); // Black for wheels
-            SDL_RenderFillRect(renderer, &carWheel1);
-            SDL_RenderFillRect(renderer, &carWheel2);
-            SDL_RenderFillRect(renderer, &carWheel3);
-            SDL_RenderFillRect(renderer, &carWheel4);
         }
-        SDL_UnlockMutex(vehicleMutex);
+    }
+}
+void drawVehicles(SDL_Renderer* renderer) {
+    SDL_LockMutex(vehicleMutex);
+    for (int i = 0; i < MAX_VEHICLES; i++) {
+        if (!vehicles[i].active) continue;
+
+        // Use the color attribute
+        SDL_SetRenderDrawColor(renderer, vehicles[i].color.r, vehicles[i].color.g, vehicles[i].color.b, vehicles[i].color.a);
+
+        SDL_Rect carBody;
+        SDL_Rect carWindow;
+        SDL_Rect carWheel1, carWheel2, carWheel3, carWheel4;
+
+        if (vehicles[i].lane == 'A' || vehicles[i].lane == 'B') { 
+            // Vehicles moving horizontally (left/right)
+            carBody = (SDL_Rect){
+                vehicles[i].x - VEHICLE_LENGTH / 2, 
+                vehicles[i].y - VEHICLE_SIZE / 2, 
+                VEHICLE_LENGTH,
+                VEHICLE_SIZE
+            };
+
+            carWindow = (SDL_Rect){
+                vehicles[i].x - VEHICLE_LENGTH / 4, 
+                vehicles[i].y - VEHICLE_SIZE / 4, 
+                VEHICLE_LENGTH / 2,
+                VEHICLE_SIZE / 2
+            };
+
+            carWheel1 = (SDL_Rect){
+                vehicles[i].x - VEHICLE_LENGTH / 2 + 5, 
+                vehicles[i].y - VEHICLE_SIZE / 2 - 5, 
+                10, 
+                10
+            };
+
+            carWheel2 = (SDL_Rect){
+                vehicles[i].x + VEHICLE_LENGTH / 2 - 15, 
+                vehicles[i].y - VEHICLE_SIZE / 2 - 5, 
+                10, 
+                10
+            };
+
+            carWheel3 = (SDL_Rect){
+                vehicles[i].x - VEHICLE_LENGTH / 2 + 5, 
+                vehicles[i].y + VEHICLE_SIZE / 2 - 5, 
+                10, 
+                10
+            };
+
+            carWheel4 = (SDL_Rect){
+                vehicles[i].x + VEHICLE_LENGTH / 2 - 15, 
+                vehicles[i].y + VEHICLE_SIZE / 2 - 5, 
+                10, 
+                10
+            };
+        } else {  
+            // Vehicles moving vertically (up/down)
+            carBody = (SDL_Rect){
+                vehicles[i].x - VEHICLE_SIZE / 2 + 5, 
+                vehicles[i].y - VEHICLE_LENGTH / 2, 
+                VEHICLE_SIZE,
+                VEHICLE_LENGTH
+            };
+
+            carWindow = (SDL_Rect){
+                vehicles[i].x - VEHICLE_SIZE / 4 + 5, 
+                vehicles[i].y - VEHICLE_LENGTH / 4, 
+                VEHICLE_SIZE / 2,
+                VEHICLE_LENGTH / 2
+            };
+
+            carWheel1 = (SDL_Rect){
+                vehicles[i].x - VEHICLE_SIZE / 2 , 
+                vehicles[i].y - VEHICLE_LENGTH / 2 + 5, 
+                10, 
+                10
+            };
+
+            carWheel2 = (SDL_Rect){
+                vehicles[i].x + VEHICLE_SIZE / 2 , 
+                vehicles[i].y - VEHICLE_LENGTH / 2 + 5, 
+                10, 
+                10
+            };
+
+            carWheel3 = (SDL_Rect){
+                vehicles[i].x - VEHICLE_SIZE / 2 , 
+                vehicles[i].y + VEHICLE_LENGTH / 2 - 15, 
+                10, 
+                10
+            };
+
+            carWheel4 = (SDL_Rect){
+                vehicles[i].x + VEHICLE_SIZE / 2 , 
+                vehicles[i].y + VEHICLE_LENGTH / 2 - 15, 
+                10, 
+                10
+            };
+        }
+
+        // Draw car body with rounded corners
+        drawRoundedRect(renderer, &carBody, 10);
+
+        // Draw car window with rounded corners
+        SDL_SetRenderDrawColor(renderer, 200, 200, 200, 255); // Light gray for windows
+        drawRoundedRect(renderer, &carWindow, 5);
+
+        // Draw car wheels
+        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255); // Black for wheels
+        SDL_RenderFillRect(renderer, &carWheel1);
+        SDL_RenderFillRect(renderer, &carWheel2);
+        SDL_RenderFillRect(renderer, &carWheel3);
+        SDL_RenderFillRect(renderer, &carWheel4);
+    }
+    SDL_UnlockMutex(vehicleMutex);
 }
 
 void* readAndParseFile(void* arg) {
