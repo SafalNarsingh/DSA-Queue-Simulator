@@ -50,6 +50,10 @@ git clone https://github.com/SafalNarsingh/DSA-Queue-Simulator
 
 ## Troubleshooting:
 Make sure mingw and pthread, POSIX threads library for MinGW, are installed on your device.
+
+## Dependencies:
+- C
+- SDL2
     
 ## Insights
 #### Normal Lane:
